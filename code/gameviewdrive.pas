@@ -132,8 +132,8 @@ begin
   HudHelp := TCastleLabel.Create(FreeAtStop);
   HudHelp.FontSize := 16;
   HudHelp.Color := White;
-  HudHelp.Caption := 'UKHTA DRIVE 0.1' + NL +
-    'W/S - gas/brake   A/D - steering   SPACE - handbrake' + NL +
+  HudHelp.Caption := 'UKHTA DRIVE 0.1' + LineEnding +
+    'W/S - gas/brake   A/D - steering   SPACE - handbrake' + LineEnding +
     'R - reset   N - day/night';
   HudHelp.Anchor(hpLeft, 18);
   HudHelp.Anchor(vpBottom, 18);
