@@ -54,8 +54,8 @@ end;
 
 procedure TVehicleState.Reset;
 begin
-  FX := 10.0;
-  FZ := 70.0;
+  FX := 0.0;
+  FZ := 240.0;
   FYaw := 0.0;
   FSpeed := 0.0;
   FSteering := 0.0;
@@ -121,7 +121,8 @@ begin
   if Input.Left then TargetSteer := TargetSteer + MaxSteer;
   if Input.Right then TargetSteer := TargetSteer - MaxSteer;
   SteerSpeed := 4.8 / (1.0 + Abs(FSpeed) * 0.035);
-  FSteering := FSteering + (TargetSteer - FSteering) * ClampS(SteerSpeed * SecondsPassed, 0.0, 1.0);
+  FSteering := FSteering + (TargetSteer - FSteering) *
+    ClampS(SteerSpeed * SecondsPassed, 0.0, 1.0);
 
   if Abs(FSpeed) > 0.05 then
     FYaw := FYaw + (FSpeed / WheelBase) * Tan(FSteering) * SecondsPassed;
