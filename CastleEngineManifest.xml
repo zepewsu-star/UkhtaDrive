@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<project
+  name="ukhta-drive"
+  executable_name="UkhtaDrive"
+  standalone_source="ukhta_drive_standalone.dpr"
+  game_units="GameInitialize"
+  qualified_name="local.ukhta.drive"
+  caption="Ukhta Drive"
+  screen_orientation="landscape"
+>
+  <version value="0.1.0" code="1" />
+
+  <compiler_options>
+    <search_paths>
+      <path value="code/" />
+    </search_paths>
+  </compiler_options>
+
+  <package>
+    <include path="README_RU.txt" />
+    <include path="LICENSE_NOTES.txt" />
+  </package>
+</project>
