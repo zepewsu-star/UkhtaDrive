@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<castle_settings>
+  <ui_scaling mode="enclose-reference-size">
+    <reference_size width="1600" height="900" />
+  </ui_scaling>
+</castle_settings>
