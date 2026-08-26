@@ -1,0 +1,44 @@
+name: Build Ukhta Drive Windows x64
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  windows-x64:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup Castle Game Engine
+        run: |
+          cd /tmp/
+          git clone https://github.com/castle-engine/castle-build-ci.git \
+            --depth=1 --single-branch --branch=master
+          castle-build-ci/install_dependencies
+          castle-build-ci/setup_castle_engine --os=win64 --cpu=x86_64
+
+      - name: Compile
+        run: castle-engine compile --os=win64 --cpu=x86_64
+
+      - name: Package
+        run: castle-engine package --assume-compiled --os=win64 --cpu=x86_64
+
+      - name: Upload Windows build
+        uses: actions/upload-artifact@v7
+        with:
+          name: UkhtaDrive-Windows-x64
+          path: |
+            *.zip
+            *.tar.gz
+          if-no-files-found: error
