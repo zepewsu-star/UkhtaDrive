@@ -20,15 +20,18 @@ type
     Fog: TCastleFog;
     Sun: TCastleDirectionalLight;
     NightMode: Boolean;
-    procedure AddBox(const X, Y, Z, W, H, D: Single; const C: TVector4);
+    procedure AddBox(const X, Y, Z, W, H, D: Single; const C: TVector4;
+      const TextureUrl: String = ''; const NormalUrl: String = '';
+      const TextureScaleX: Single = 1; const TextureScaleY: Single = 1);
     procedure AddBuilding(const X, Z, W, D, H: Single;
-      const C: TVector4; const Floors, Bays, Seed: Integer);
+      const TextureUrl: String; const Floors, Bays: Integer);
     procedure AddTree(const X, Z: Single);
     procedure AddLamp(const X, Z: Single);
     procedure AddParkedCar(const X, Z: Single; const C: TVector4);
     procedure BuildWorld;
     procedure ApplyLighting;
     procedure UpdateCameraAndCockpit;
+    function MouseSteeringAxis: Single;
   public
     constructor Create(AOwner: TComponent); override;
     procedure Start; override;
@@ -51,7 +54,9 @@ begin
   NightMode := False;
 end;
 
-procedure TViewDrive.AddBox(const X, Y, Z, W, H, D: Single; const C: TVector4);
+procedure TViewDrive.AddBox(const X, Y, Z, W, H, D: Single; const C: TVector4;
+  const TextureUrl: String; const NormalUrl: String;
+  const TextureScaleX: Single; const TextureScaleY: Single);
 var
   B: TCastleBox;
 begin
@@ -59,98 +64,78 @@ begin
   B.Size := Vector3(W, H, D);
   B.Translation := Vector3(X, Y, Z);
   B.Color := C;
+  if TextureUrl <> '' then
+  begin
+    B.Texture := TextureUrl;
+    B.TextureScale := Vector2(TextureScaleX, TextureScaleY);
+  end;
+  if NormalUrl <> '' then
+    B.TextureNormalMap := NormalUrl;
   MainViewport.Items.Add(B);
 end;
 
 procedure TViewDrive.AddBuilding(const X, Z, W, D, H: Single;
-  const C: TVector4; const Floors, Bays, Seed: Integer);
+  const TextureUrl: String; const Floors, Bays: Integer);
 var
-  F, B: Integer;
-  RoadFaceX, WY, WZ, StepZ: Single;
-  WC: TVector4;
+  RoofColor: TVector4;
 begin
-  AddBox(X, H * 0.5, Z, W, H, D, C);
-  AddBox(X, H + 0.20, Z, W + 0.35, 0.38, D + 0.35,
-    Vector4(0.82, 0.85, 0.87, 1));
+  AddBox(X, H * 0.5, Z, W, H, D, White, TextureUrl, '',
+    Max(2.0, D / 8.0), Max(2.0, H / 8.0));
+  RoofColor := Vector4(0.46, 0.49, 0.52, 1);
+  AddBox(X, H + 0.22, Z, W + 0.45, 0.44, D + 0.45, RoofColor);
 
+  { Entrance volume and canopy make the facade read less like a simple box. }
   if X < 0 then
-    RoadFaceX := X + W * 0.5 + 0.08
-  else
-    RoadFaceX := X - W * 0.5 - 0.08;
-
-  if Bays > 1 then
-    StepZ := (D - 4.2) / (Bays - 1)
-  else
-    StepZ := 0;
-
-  for F := 0 to Floors - 1 do
   begin
-    WY := 2.35 + F * 3.05;
-    if WY > H - 1.0 then Break;
-
-    { subtle floor band, makes a box facade read as an apartment building }
-    AddBox(RoadFaceX, WY - 1.25, Z, 0.10, 0.09, D - 0.5,
-      Vector4(0.40, 0.43, 0.46, 1));
-
-    for B := 0 to Bays - 1 do
-    begin
-      WZ := Z - D * 0.5 + 2.1 + B * StepZ;
-      if ((F * Bays + B + Seed) mod 5 = 0) or
-         ((F * Bays + B + Seed) mod 7 = 0) then
-        WC := Vector4(0.96, 0.72, 0.38, 1)
-      else
-        WC := Vector4(0.12, 0.17, 0.23, 1);
-      AddBox(RoadFaceX, WY, WZ, 0.13, 1.35, 1.65, WC);
-    end;
+    AddBox(X + W * 0.5 + 0.50, 1.35, Z + D * 0.22,
+      1.05, 2.7, 3.2, Vector4(0.12, 0.14, 0.16, 1));
+    AddBox(X + W * 0.5 + 1.05, 2.7, Z + D * 0.22,
+      2.1, 0.16, 3.7, Vector4(0.30, 0.31, 0.33, 1));
+  end else
+  begin
+    AddBox(X - W * 0.5 - 0.50, 1.35, Z + D * 0.22,
+      1.05, 2.7, 3.2, Vector4(0.12, 0.14, 0.16, 1));
+    AddBox(X - W * 0.5 - 1.05, 2.7, Z + D * 0.22,
+      2.1, 0.16, 3.7, Vector4(0.30, 0.31, 0.33, 1));
   end;
-
-  { entrance and canopy on the road-facing side }
-  AddBox(RoadFaceX, 1.15, Z + D * 0.25, 0.18, 2.25, 2.15,
-    Vector4(0.08, 0.10, 0.13, 1));
-  if X < 0 then
-    AddBox(RoadFaceX + 0.65, 2.35, Z + D * 0.25, 1.35, 0.18, 2.75,
-      Vector4(0.30, 0.32, 0.34, 1))
-  else
-    AddBox(RoadFaceX - 0.65, 2.35, Z + D * 0.25, 1.35, 0.18, 2.75,
-      Vector4(0.30, 0.32, 0.34, 1));
 end;
 
 procedure TViewDrive.AddTree(const X, Z: Single);
 var
   Trunk: TCastleCylinder;
-  Crown1, Crown2, SnowTop: TCastleCone;
+  Crown1, Crown2, Crown3: TCastleCone;
 begin
   Trunk := TCastleCylinder.Create(FreeAtStop);
-  Trunk.Radius := 0.22;
-  Trunk.Height := 4.2;
-  Trunk.Slices := 10;
-  Trunk.Color := Vector4(0.20, 0.13, 0.08, 1);
-  Trunk.Translation := Vector3(X, 2.1, Z);
+  Trunk.Radius := 0.18;
+  Trunk.Height := 4.4;
+  Trunk.Slices := 12;
+  Trunk.Color := Vector4(0.19, 0.12, 0.07, 1);
+  Trunk.Translation := Vector3(X, 2.2, Z);
   MainViewport.Items.Add(Trunk);
 
   Crown1 := TCastleCone.Create(FreeAtStop);
   Crown1.BottomRadius := 2.3;
-  Crown1.Height := 5.8;
-  Crown1.Slices := 14;
-  Crown1.Color := Vector4(0.07, 0.18, 0.14, 1);
-  Crown1.Translation := Vector3(X, 4.8, Z);
+  Crown1.Height := 5.0;
+  Crown1.Slices := 18;
+  Crown1.Color := Vector4(0.055, 0.14, 0.10, 1);
+  Crown1.Translation := Vector3(X, 4.7, Z);
   MainViewport.Items.Add(Crown1);
 
   Crown2 := TCastleCone.Create(FreeAtStop);
   Crown2.BottomRadius := 1.75;
-  Crown2.Height := 4.7;
-  Crown2.Slices := 14;
-  Crown2.Color := Vector4(0.06, 0.15, 0.12, 1);
-  Crown2.Translation := Vector3(X, 7.1, Z);
+  Crown2.Height := 4.4;
+  Crown2.Slices := 18;
+  Crown2.Color := Vector4(0.06, 0.16, 0.115, 1);
+  Crown2.Translation := Vector3(X, 6.6, Z);
   MainViewport.Items.Add(Crown2);
 
-  SnowTop := TCastleCone.Create(FreeAtStop);
-  SnowTop.BottomRadius := 0.95;
-  SnowTop.Height := 2.7;
-  SnowTop.Slices := 14;
-  SnowTop.Color := Vector4(0.79, 0.84, 0.87, 1);
-  SnowTop.Translation := Vector3(X, 8.35, Z);
-  MainViewport.Items.Add(SnowTop);
+  Crown3 := TCastleCone.Create(FreeAtStop);
+  Crown3.BottomRadius := 1.15;
+  Crown3.Height := 3.5;
+  Crown3.Slices := 18;
+  Crown3.Color := Vector4(0.09, 0.19, 0.14, 1);
+  Crown3.Translation := Vector3(X, 8.1, Z);
+  MainViewport.Items.Add(Crown3);
 end;
 
 procedure TViewDrive.AddLamp(const X, Z: Single);
@@ -159,20 +144,21 @@ var
   Light: TCastlePointLight;
 begin
   Pole := TCastleCylinder.Create(FreeAtStop);
-  Pole.Radius := 0.09;
-  Pole.Height := 8.0;
-  Pole.Slices := 10;
-  Pole.Color := Vector4(0.15, 0.17, 0.19, 1);
-  Pole.Translation := Vector3(X, 4.0, Z);
+  Pole.Radius := 0.075;
+  Pole.Height := 8.3;
+  Pole.Slices := 12;
+  Pole.Color := Vector4(0.13, 0.14, 0.15, 1);
+  Pole.Translation := Vector3(X, 4.15, Z);
   MainViewport.Items.Add(Pole);
 
-  AddBox(X, 7.85, Z, 0.55, 0.22, 0.42,
-    Vector4(0.95, 0.73, 0.38, 1));
+  AddBox(X, 8.15, Z, 0.7, 0.18, 0.38,
+    Vector4(1.0, 0.75, 0.39, 1));
 
   Light := TCastlePointLight.Create(FreeAtStop);
-  Light.Translation := Vector3(X, 7.65, Z);
+  Light.Translation := Vector3(X, 7.8, Z);
   Light.Color := Vector3(1.0, 0.72, 0.42);
-  Light.Intensity := 8.0;
+  Light.Intensity := 9.5;
+  Light.Radius := 24;
   MainViewport.Items.Add(Light);
 end;
 
@@ -180,117 +166,106 @@ procedure TViewDrive.AddParkedCar(const X, Z: Single; const C: TVector4);
 var
   DarkC: TVector4;
 begin
-  DarkC := Vector4(0.06, 0.08, 0.10, 1);
-  AddBox(X, 0.55, Z, 1.82, 0.68, 4.35, C);
-  AddBox(X, 1.03, Z - 0.15, 1.60, 0.52, 2.25, DarkC);
-  AddBox(X, 1.31, Z - 0.10, 1.42, 0.12, 1.75, C);
-  AddBox(X - 0.92, 0.32, Z - 1.35, 0.16, 0.42, 0.62, DarkC);
-  AddBox(X + 0.92, 0.32, Z - 1.35, 0.16, 0.42, 0.62, DarkC);
-  AddBox(X - 0.92, 0.32, Z + 1.35, 0.16, 0.42, 0.62, DarkC);
-  AddBox(X + 0.92, 0.32, Z + 1.35, 0.16, 0.42, 0.62, DarkC);
+  DarkC := Vector4(0.035, 0.045, 0.055, 1);
+  AddBox(X, 0.55, Z, 1.86, 0.70, 4.45, C);
+  AddBox(X, 1.08, Z - 0.12, 1.62, 0.54, 2.35, DarkC);
+  AddBox(X, 1.35, Z - 0.10, 1.44, 0.12, 1.8, C);
 end;
 
 procedure TViewDrive.BuildWorld;
 var
   Ground: TCastlePlane;
   I: Integer;
+  RoadTex, SnowTex: String;
 begin
+  RoadTex := 'castle-data:/visual/road_winter.jpg';
+  SnowTex := 'castle-data:/visual/snow_winter.jpg';
+
   Ground := TCastlePlane.Create(FreeAtStop);
-  Ground.Size := Vector2(1100, 1100);
-  Ground.Color := Vector4(0.72, 0.78, 0.82, 1.0);
+  Ground.Size := Vector2(1200, 1200);
+  Ground.Color := White;
+  Ground.Texture := SnowTex;
+  Ground.TextureScale := Vector2(32, 32);
   MainViewport.Items.Add(Ground);
 
   Sun := TCastleDirectionalLight.Create(FreeAtStop);
-  Sun.Color := Vector3(0.77, 0.82, 0.92);
-  Sun.Direction := Vector3(0.28, -0.86, 0.35);
+  Sun.Color := Vector3(0.76, 0.82, 0.94);
+  Sun.Direction := Vector3(0.30, -0.88, 0.30);
   MainViewport.Items.Add(Sun);
 
   Fog := TCastleFog.Create(FreeAtStop);
-  Fog.VisibilityRange := 310;
+  Fog.VisibilityRange := 360;
   MainViewport.Fog := Fog;
 
-  { Main winter avenue, sidewalks and compacted snow at road edges. }
-  AddBox(0, 0.035, 0, 24, 0.07, 940,
-    Vector4(0.115, 0.125, 0.135, 1));
-  AddBox(-16.5, 0.08, 0, 8.0, 0.14, 940,
-    Vector4(0.63, 0.67, 0.70, 1));
-  AddBox(16.5, 0.08, 0, 8.0, 0.14, 940,
-    Vector4(0.63, 0.67, 0.70, 1));
-  AddBox(-12.0, 0.20, 0, 1.5, 0.40, 940,
-    Vector4(0.80, 0.84, 0.87, 1));
-  AddBox(12.0, 0.20, 0, 1.5, 0.40, 940,
-    Vector4(0.80, 0.84, 0.87, 1));
+  { Textured winter avenue. }
+  AddBox(0, 0.04, -60, 24, 0.08, 1050, White,
+    RoadTex, '', 3.0, 72.0);
+  AddBox(-17.0, 0.09, -60, 9.0, 0.16, 1050, White,
+    SnowTex, '', 2.0, 70.0);
+  AddBox(17.0, 0.09, -60, 9.0, 0.16, 1050, White,
+    SnowTex, '', 2.0, 70.0);
+  AddBox(-12.2, 0.22, -60, 1.8, 0.42, 1050, White,
+    SnowTex, '', 1.0, 70.0);
+  AddBox(12.2, 0.22, -60, 1.8, 0.42, 1050, White,
+    SnowTex, '', 1.0, 70.0);
 
-  { dashed center line and road edge markings }
-  for I := -30 to 30 do
-    AddBox(0, 0.082, I * 15, 0.18, 0.025, 7.0,
-      Vector4(0.86, 0.84, 0.69, 1));
-  AddBox(-9.6, 0.082, 0, 0.13, 0.025, 940,
-    Vector4(0.75, 0.77, 0.76, 1));
-  AddBox(9.6, 0.082, 0, 0.13, 0.025, 940,
-    Vector4(0.75, 0.77, 0.76, 1));
+  for I := -34 to 30 do
+    AddBox(0, 0.092, I * 15, 0.17, 0.025, 7.0,
+      Vector4(0.86, 0.84, 0.68, 1));
 
-  { side streets }
-  AddBox(0, 0.04, 145, 130, 0.08, 16,
-    Vector4(0.13, 0.14, 0.15, 1));
-  AddBox(0, 0.04, -80, 130, 0.08, 15,
-    Vector4(0.13, 0.14, 0.15, 1));
-  AddBox(0, 0.04, -285, 130, 0.08, 16,
-    Vector4(0.13, 0.14, 0.15, 1));
+  { Intersections and side streets. }
+  AddBox(0, 0.045, 145, 145, 0.09, 17, White,
+    RoadTex, '', 10.0, 2.0);
+  AddBox(0, 0.045, -80, 145, 0.09, 16, White,
+    RoadTex, '', 10.0, 2.0);
+  AddBox(0, 0.045, -285, 145, 0.09, 17, White,
+    RoadTex, '', 10.0, 2.0);
 
-  { pedestrian crossing }
   for I := -5 to 5 do
-    AddBox(I * 1.75, 0.09, 85, 0.85, 0.026, 6.0,
-      Vector4(0.82, 0.83, 0.81, 1));
+    AddBox(I * 1.75, 0.105, 82, 0.85, 0.028, 6.2,
+      Vector4(0.83, 0.84, 0.82, 1));
 
-  { Apartment blocks. Road-facing facades get individual window geometry. }
-  AddBuilding(-39, 220, 27, 37, 18.5,
-    Vector4(0.44, 0.46, 0.49, 1), 6, 7, 1);
-  AddBuilding(39, 215, 27, 34, 24.5,
-    Vector4(0.49, 0.43, 0.38, 1), 8, 7, 3);
-  AddBuilding(-43, 125, 34, 42, 27.5,
-    Vector4(0.42, 0.47, 0.50, 1), 9, 8, 5);
-  AddBuilding(42, 115, 31, 39, 18.5,
-    Vector4(0.51, 0.48, 0.43, 1), 6, 8, 2);
-  AddBuilding(-40, 30, 29, 36, 21.5,
-    Vector4(0.50, 0.45, 0.41, 1), 7, 7, 9);
-  AddBuilding(43, 22, 34, 43, 27.5,
-    Vector4(0.40, 0.44, 0.49, 1), 9, 9, 4);
-  AddBuilding(-42, -78, 33, 41, 24.5,
-    Vector4(0.47, 0.49, 0.50, 1), 8, 8, 12);
-  AddBuilding(41, -92, 30, 36, 18.5,
-    Vector4(0.53, 0.47, 0.41, 1), 6, 7, 6);
-  AddBuilding(-41, -190, 31, 40, 27.5,
-    Vector4(0.42, 0.45, 0.48, 1), 9, 8, 15);
-  AddBuilding(43, -205, 34, 42, 24.5,
-    Vector4(0.49, 0.44, 0.39, 1), 8, 9, 11);
-  AddBuilding(-40, -315, 29, 38, 18.5,
-    Vector4(0.46, 0.48, 0.50, 1), 6, 8, 20);
-  AddBuilding(42, -325, 32, 40, 27.5,
-    Vector4(0.41, 0.45, 0.49, 1), 9, 8, 17);
+  { Photo-derived facades. The geometry is still lightweight but the surface reads as a real city. }
+  AddBuilding(-40, 215, 28, 38, 19,
+    'castle-data:/visual/facade_1.jpg', 6, 7);
+  AddBuilding(40, 210, 29, 36, 25,
+    'castle-data:/visual/facade_2.jpg', 8, 7);
+  AddBuilding(-43, 120, 35, 43, 28,
+    'castle-data:/visual/facade_3.jpg', 9, 8);
+  AddBuilding(42, 110, 32, 40, 19,
+    'castle-data:/visual/facade_1.jpg', 6, 8);
+  AddBuilding(-41, 25, 30, 38, 22,
+    'castle-data:/visual/facade_2.jpg', 7, 7);
+  AddBuilding(44, 15, 35, 44, 28,
+    'castle-data:/visual/facade_3.jpg', 9, 9);
+  AddBuilding(-42, -85, 34, 42, 25,
+    'castle-data:/visual/facade_1.jpg', 8, 8);
+  AddBuilding(41, -100, 31, 38, 19,
+    'castle-data:/visual/facade_2.jpg', 6, 7);
+  AddBuilding(-42, -198, 32, 41, 28,
+    'castle-data:/visual/facade_3.jpg', 9, 8);
+  AddBuilding(44, -212, 35, 43, 25,
+    'castle-data:/visual/facade_1.jpg', 8, 9);
+  AddBuilding(-40, -320, 30, 39, 19,
+    'castle-data:/visual/facade_2.jpg', 6, 8);
+  AddBuilding(43, -330, 33, 41, 28,
+    'castle-data:/visual/facade_3.jpg', 9, 8);
 
-  { street lights }
-  for I := -7 to 7 do
+  for I := -8 to 7 do
   begin
-    AddLamp(-11.0, I * 55 + 5);
-    AddLamp(11.0, I * 55 - 22);
+    AddLamp(-11.1, I * 55 + 5);
+    AddLamp(11.1, I * 55 - 22);
+    AddTree(-22.0, I * 57 + 18);
+    AddTree(22.0, I * 57 - 8);
   end;
 
-  { winter trees along sidewalks }
-  for I := -7 to 7 do
-  begin
-    AddTree(-21.5, I * 57 + 18);
-    AddTree(21.5, I * 57 - 8);
-  end;
-
-  { parked cars: enough to give scale and life without traffic AI yet }
-  AddParkedCar(-8.0, 177, Vector4(0.18, 0.23, 0.29, 1));
-  AddParkedCar(8.1, 126, Vector4(0.42, 0.09, 0.07, 1));
-  AddParkedCar(-8.2, 44, Vector4(0.58, 0.60, 0.61, 1));
-  AddParkedCar(8.0, -18, Vector4(0.08, 0.12, 0.18, 1));
-  AddParkedCar(-8.0, -132, Vector4(0.28, 0.30, 0.32, 1));
-  AddParkedCar(8.1, -235, Vector4(0.33, 0.10, 0.09, 1));
-  AddParkedCar(-8.0, -344, Vector4(0.16, 0.18, 0.20, 1));
+  AddParkedCar(-8.2, 178, Vector4(0.17, 0.23, 0.30, 1));
+  AddParkedCar(8.1, 128, Vector4(0.42, 0.09, 0.07, 1));
+  AddParkedCar(-8.2, 45, Vector4(0.57, 0.60, 0.63, 1));
+  AddParkedCar(8.1, -20, Vector4(0.08, 0.12, 0.18, 1));
+  AddParkedCar(-8.2, -135, Vector4(0.28, 0.30, 0.32, 1));
+  AddParkedCar(8.1, -238, Vector4(0.34, 0.10, 0.09, 1));
+  AddParkedCar(-8.1, -347, Vector4(0.15, 0.17, 0.20, 1));
 
   ApplyLighting;
 end;
@@ -299,19 +274,34 @@ procedure TViewDrive.ApplyLighting;
 begin
   if NightMode then
   begin
-    MainViewport.BackgroundColor := Vector4(0.035, 0.055, 0.085, 1.0);
-    Sun.Intensity := 0.28;
-    Fog.Color := Vector3(0.08, 0.11, 0.16);
-    Fog.VisibilityRange := 235;
-    HudStatus.Caption := 'NIGHT  |  N = dusk';
+    MainViewport.BackgroundColor := Vector4(0.025, 0.045, 0.075, 1.0);
+    Sun.Intensity := 0.25;
+    Fog.Color := Vector3(0.06, 0.09, 0.14);
+    Fog.VisibilityRange := 245;
+    HudStatus.Caption := 'NIGHT  |  Mouse = steering  |  RMB = gas  |  LMB = brake';
   end else
   begin
-    MainViewport.BackgroundColor := Vector4(0.30, 0.37, 0.46, 1.0);
-    Sun.Intensity := 1.18;
-    Fog.Color := Vector3(0.48, 0.54, 0.61);
-    Fog.VisibilityRange := 310;
-    HudStatus.Caption := 'UKHTA DRIVE 0.2  |  WINTER DUSK  |  N = night';
+    MainViewport.BackgroundColor := Vector4(0.29, 0.36, 0.46, 1.0);
+    Sun.Intensity := 1.25;
+    Fog.Color := Vector3(0.47, 0.53, 0.61);
+    Fog.VisibilityRange := 360;
+    HudStatus.Caption := 'UKHTA DRIVE 0.3  |  Mouse = steering  |  RMB = gas  |  LMB = brake';
   end;
+end;
+
+function TViewDrive.MouseSteeringAxis: Single;
+var
+  HalfW, V: Single;
+begin
+  if Container.PixelsWidth <= 0 then
+    Exit(0);
+
+  HalfW := Container.PixelsWidth * 0.5;
+  V := (HalfW - Container.MousePosition.X) / (Container.PixelsWidth * 0.42);
+  if Abs(V) < 0.035 then V := 0;
+  if V > 1 then V := 1;
+  if V < -1 then V := -1;
+  Result := V;
 end;
 
 procedure TViewDrive.Start;
@@ -325,17 +315,16 @@ begin
   Vehicle := TVehicleState.Create;
 
   HudStatus := TCastleLabel.Create(FreeAtStop);
-  HudStatus.FontSize := 15;
-  HudStatus.Color := Vector4(0.92, 0.94, 0.96, 1);
-  HudStatus.Left := 1190;
-  HudStatus.Bottom := 855;
+  HudStatus.FontSize := 14;
+  HudStatus.Color := Vector4(0.94, 0.96, 0.98, 0.92);
+  HudStatus.Anchor(hpMiddle);
+  HudStatus.Anchor(vpTop, -18);
 
   BuildWorld;
-  UpdateCameraAndCockpit;
 
-  { The cockpit is a transparent 2D overlay. The windshield remains fully 3D. }
+  { High-detail cockpit reference overlay. Windshield area is transparent. }
   Cockpit := TCastleImageControl.Create(FreeAtStop);
-  Cockpit.Url := 'castle-data:/visual/cockpit_base.png';
+  Cockpit.Url := 'castle-data:/visual/cockpit_hq.png';
   Cockpit.Stretch := True;
   Cockpit.Width := 1600;
   Cockpit.Height := 900;
@@ -344,23 +333,27 @@ begin
   InsertFront(Cockpit);
 
   SteeringWheel := TCastleImageControl.Create(FreeAtStop);
-  SteeringWheel.Url := 'castle-data:/visual/steering.png';
+  SteeringWheel.Url := 'castle-data:/visual/steering_hq.png';
   SteeringWheel.Stretch := True;
-  SteeringWheel.Width := 440;
-  SteeringWheel.Height := 440;
-  SteeringWheel.Left := 330;
-  SteeringWheel.Bottom := -12;
+  SteeringWheel.Width := 450;
+  SteeringWheel.Height := 450;
+  SteeringWheel.Left := 265;
+  SteeringWheel.Bottom := -5;
   SteeringWheel.RotationCenter := Vector2(0.5, 0.5);
   InsertFront(SteeringWheel);
 
   HudSpeed := TCastleLabel.Create(FreeAtStop);
   HudSpeed.FontSize := 20;
-  HudSpeed.Color := Vector4(0.90, 0.96, 1.0, 1);
-  HudSpeed.Left := 523;
-  HudSpeed.Bottom := 259;
+  HudSpeed.Color := Vector4(0.84, 0.93, 1.0, 1);
+  HudSpeed.Left := 500;
+  HudSpeed.Bottom := 245;
   InsertFront(HudSpeed);
 
   InsertFront(HudStatus);
+
+  Container.MousePosition := Vector2(Container.PixelsWidth * 0.5,
+    Container.PixelsHeight * 0.5);
+  UpdateCameraAndCockpit;
 end;
 
 procedure TViewDrive.Stop;
@@ -373,14 +366,14 @@ procedure TViewDrive.UpdateCameraAndCockpit;
 var
   Dir: TVector3;
 begin
-  Dir := Vector3(Sin(Vehicle.Yaw), -0.030, -Cos(Vehicle.Yaw));
+  Dir := Vector3(Sin(Vehicle.Yaw), -0.024, -Cos(Vehicle.Yaw));
   MainViewport.Camera.SetWorldView(
     Vector3(Vehicle.X, 1.62, Vehicle.Z),
     Dir,
     Vector3(0, 1, 0));
 
   if SteeringWheel <> nil then
-    SteeringWheel.Rotation := -Vehicle.Steering * 2.15;
+    SteeringWheel.Rotation := -Vehicle.Steering * 3.4;
 end;
 
 procedure TViewDrive.Update(const SecondsPassed: Single; var HandleInput: Boolean);
@@ -389,8 +382,11 @@ var
 begin
   inherited;
 
-  Input.Gas := Container.Pressed[keyW] or Container.Pressed[keyArrowUp];
-  Input.Brake := Container.Pressed[keyS] or Container.Pressed[keyArrowDown];
+  Input.Gas := (buttonRight in Container.MousePressed) or
+    Container.Pressed[keyW] or Container.Pressed[keyArrowUp];
+  Input.Brake := (buttonLeft in Container.MousePressed) or
+    Container.Pressed[keyS] or Container.Pressed[keyArrowDown];
+  Input.SteeringAxis := MouseSteeringAxis;
   Input.Left := Container.Pressed[keyA] or Container.Pressed[keyArrowLeft];
   Input.Right := Container.Pressed[keyD] or Container.Pressed[keyArrowRight];
   Input.HandBrake := Container.Pressed[keySpace];
@@ -399,9 +395,9 @@ begin
   UpdateCameraAndCockpit;
 
   if Vehicle.Speed < -0.4 then
-    HudSpeed.Caption := Format('R  %3d', [Round(Abs(Vehicle.Speed) * 3.6)])
+    HudSpeed.Caption := Format('R  %3d km/h', [Round(Abs(Vehicle.Speed) * 3.6)])
   else
-    HudSpeed.Caption := Format('D  %3d', [Round(Abs(Vehicle.Speed) * 3.6)]);
+    HudSpeed.Caption := Format('D  %3d km/h', [Round(Abs(Vehicle.Speed) * 3.6)]);
 end;
 
 function TViewDrive.Press(const Event: TInputPressRelease): Boolean;
@@ -412,6 +408,8 @@ begin
   if Event.IsKey(keyR) then
   begin
     Vehicle.Reset;
+    Container.MousePosition := Vector2(Container.PixelsWidth * 0.5,
+      Container.PixelsHeight * 0.5);
     UpdateCameraAndCockpit;
     Exit(True);
   end;

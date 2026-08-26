@@ -9,6 +9,7 @@ type
     Left: Boolean;
     Right: Boolean;
     HandBrake: Boolean;
+    SteeringAxis: Single; { -1 = right, +1 = left }
   end;
 
   TVehicleState = class
@@ -54,9 +55,8 @@ end;
 
 procedure TVehicleState.Reset;
 begin
-  { Spawn in the middle of the main avenue, looking toward the city center. }
   FX := 0.0;
-  FZ := 240.0;
+  FZ := 250.0;
   FYaw := 0.0;
   FSpeed := 0.0;
   FSteering := 0.0;
@@ -77,7 +77,7 @@ end;
 procedure TVehicleState.Update(const SecondsPassed: Single; const Input: TDriveInput);
 const
   WheelBase = 2.91;
-  MaxSteer = 0.50;
+  MaxSteer = 0.52;
   MaxForward = 55.0;
   MaxReverse = 8.0;
 var
@@ -115,13 +115,19 @@ begin
 
   Aero := 0.0026 * FSpeed * Abs(FSpeed);
   FSpeed := FSpeed - Aero * SecondsPassed;
-  if Input.HandBrake then FSpeed := FSpeed * Power(0.22, SecondsPassed);
+
+  if Input.HandBrake then
+    FSpeed := FSpeed * Power(0.22, SecondsPassed);
+
   FSpeed := ClampS(FSpeed, -MaxReverse, MaxForward);
 
-  TargetSteer := 0.0;
-  if Input.Left then TargetSteer := TargetSteer + MaxSteer;
-  if Input.Right then TargetSteer := TargetSteer - MaxSteer;
-  SteerSpeed := 4.8 / (1.0 + Abs(FSpeed) * 0.035);
+  { Analog mouse steering first; keyboard remains as a fallback. }
+  TargetSteer := ClampS(Input.SteeringAxis, -1.0, 1.0) * MaxSteer;
+  if Input.Left then TargetSteer := MaxSteer;
+  if Input.Right then TargetSteer := -MaxSteer;
+
+  { Slower steering at speed, but still responsive at parking speeds. }
+  SteerSpeed := 6.2 / (1.0 + Abs(FSpeed) * 0.045);
   FSteering := FSteering + (TargetSteer - FSteering) *
     ClampS(SteerSpeed * SecondsPassed, 0.0, 1.0);
 
