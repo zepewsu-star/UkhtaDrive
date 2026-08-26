@@ -88,6 +88,7 @@ begin
     WY := 2.35 + F * 3.05;
     if WY > H - 1.0 then Break;
 
+    { subtle floor band, makes a box facade read as an apartment building }
     AddBox(RoadFaceX, WY - 1.25, Z, 0.10, 0.09, D - 0.5,
       Vector4(0.40, 0.43, 0.46, 1));
 
@@ -103,6 +104,7 @@ begin
     end;
   end;
 
+  { entrance and canopy on the road-facing side }
   AddBox(RoadFaceX, 1.15, Z + D * 0.25, 0.18, 2.25, 2.15,
     Vector4(0.08, 0.10, 0.13, 1));
   if X < 0 then
@@ -207,6 +209,7 @@ begin
   Fog.VisibilityRange := 310;
   MainViewport.Fog := Fog;
 
+  { Main winter avenue, sidewalks and compacted snow at road edges. }
   AddBox(0, 0.035, 0, 24, 0.07, 940,
     Vector4(0.115, 0.125, 0.135, 1));
   AddBox(-16.5, 0.08, 0, 8.0, 0.14, 940,
@@ -218,6 +221,7 @@ begin
   AddBox(12.0, 0.20, 0, 1.5, 0.40, 940,
     Vector4(0.80, 0.84, 0.87, 1));
 
+  { dashed center line and road edge markings }
   for I := -30 to 30 do
     AddBox(0, 0.082, I * 15, 0.18, 0.025, 7.0,
       Vector4(0.86, 0.84, 0.69, 1));
@@ -226,6 +230,7 @@ begin
   AddBox(9.6, 0.082, 0, 0.13, 0.025, 940,
     Vector4(0.75, 0.77, 0.76, 1));
 
+  { side streets }
   AddBox(0, 0.04, 145, 130, 0.08, 16,
     Vector4(0.13, 0.14, 0.15, 1));
   AddBox(0, 0.04, -80, 130, 0.08, 15,
@@ -233,10 +238,12 @@ begin
   AddBox(0, 0.04, -285, 130, 0.08, 16,
     Vector4(0.13, 0.14, 0.15, 1));
 
+  { pedestrian crossing }
   for I := -5 to 5 do
     AddBox(I * 1.75, 0.09, 85, 0.85, 0.026, 6.0,
       Vector4(0.82, 0.83, 0.81, 1));
 
+  { Apartment blocks. Road-facing facades get individual window geometry. }
   AddBuilding(-39, 220, 27, 37, 18.5,
     Vector4(0.44, 0.46, 0.49, 1), 6, 7, 1);
   AddBuilding(39, 215, 27, 34, 24.5,
@@ -262,18 +269,21 @@ begin
   AddBuilding(42, -325, 32, 40, 27.5,
     Vector4(0.41, 0.45, 0.49, 1), 9, 8, 17);
 
+  { street lights }
   for I := -7 to 7 do
   begin
     AddLamp(-11.0, I * 55 + 5);
     AddLamp(11.0, I * 55 - 22);
   end;
 
+  { winter trees along sidewalks }
   for I := -7 to 7 do
   begin
     AddTree(-21.5, I * 57 + 18);
     AddTree(21.5, I * 57 - 8);
   end;
 
+  { parked cars: enough to give scale and life without traffic AI yet }
   AddParkedCar(-8.0, 177, Vector4(0.18, 0.23, 0.29, 1));
   AddParkedCar(8.1, 126, Vector4(0.42, 0.09, 0.07, 1));
   AddParkedCar(-8.2, 44, Vector4(0.58, 0.60, 0.61, 1));
@@ -323,6 +333,7 @@ begin
   BuildWorld;
   UpdateCameraAndCockpit;
 
+  { The cockpit is a transparent 2D overlay. The windshield remains fully 3D. }
   Cockpit := TCastleImageControl.Create(FreeAtStop);
   Cockpit.Url := 'castle-data:/visual/cockpit_base.png';
   Cockpit.Stretch := True;

@@ -54,6 +54,7 @@ end;
 
 procedure TVehicleState.Reset;
 begin
+  { Spawn in the middle of the main avenue, looking toward the city center. }
   FX := 0.0;
   FZ := 240.0;
   FYaw := 0.0;
