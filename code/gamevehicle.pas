@@ -6,27 +6,19 @@ type
   TDriveInput = record
     Gas: Boolean;
     Brake: Boolean;
-    Left: Boolean;
-    Right: Boolean;
+    Steering: Single; { -1 right .. +1 left }
     HandBrake: Boolean;
-    SteeringAxis: Single; { -1 = right, +1 = left }
   end;
 
   TVehicleState = class
   private
-    FX: Single;
-    FZ: Single;
-    FYaw: Single;
-    FSpeed: Single;
-    FSteering: Single;
+    FX, FZ, FYaw, FSpeed, FSteering: Single;
     FOdometer: Double;
     function ClampS(const V, AMin, AMax: Single): Single;
   public
     constructor Create;
     procedure Reset;
     procedure Update(const SecondsPassed: Single; const Input: TDriveInput);
-    procedure RestorePosition(const AX, AZ: Single);
-    procedure StopAfterCollision;
 
     property X: Single read FX;
     property Z: Single read FZ;
@@ -56,22 +48,11 @@ end;
 procedure TVehicleState.Reset;
 begin
   FX := 0.0;
-  FZ := 250.0;
+  FZ := 235.0;
   FYaw := 0.0;
   FSpeed := 0.0;
   FSteering := 0.0;
   FOdometer := 0.0;
-end;
-
-procedure TVehicleState.RestorePosition(const AX, AZ: Single);
-begin
-  FX := AX;
-  FZ := AZ;
-end;
-
-procedure TVehicleState.StopAfterCollision;
-begin
-  FSpeed := -FSpeed * 0.10;
 end;
 
 procedure TVehicleState.Update(const SecondsPassed: Single; const Input: TDriveInput);
@@ -85,14 +66,15 @@ var
   OldSpeed, Travel: Single;
 begin
   if SecondsPassed <= 0 then Exit;
+
   OldSpeed := FSpeed;
 
   if Input.Gas then
   begin
     if FSpeed >= 0 then
-      Accel := 5.8 * (1.0 - ClampS(FSpeed / MaxForward, 0.0, 0.92))
+      Accel := 6.2 * (1.0 - ClampS(FSpeed / MaxForward, 0.0, 0.93))
     else
-      Accel := 7.0;
+      Accel := 7.4;
     FSpeed := FSpeed + Accel * SecondsPassed;
   end;
 
@@ -100,38 +82,36 @@ begin
   begin
     if FSpeed > 0.35 then
     begin
-      BrakeForce := 10.5;
+      BrakeForce := 11.5;
       FSpeed := FSpeed - BrakeForce * SecondsPassed;
     end else
-      FSpeed := FSpeed - 3.2 * SecondsPassed;
+      FSpeed := FSpeed - 3.6 * SecondsPassed;
   end;
 
   if not Input.Gas then
   begin
-    Rolling := 0.18;
-    if FSpeed > 0 then FSpeed := Max(0.0, FSpeed - Rolling * SecondsPassed)
-    else if FSpeed < 0 then FSpeed := Min(0.0, FSpeed + Rolling * SecondsPassed);
+    Rolling := 0.20;
+    if FSpeed > 0 then
+      FSpeed := Max(0.0, FSpeed - Rolling * SecondsPassed)
+    else if FSpeed < 0 then
+      FSpeed := Min(0.0, FSpeed + Rolling * SecondsPassed);
   end;
 
-  Aero := 0.0026 * FSpeed * Abs(FSpeed);
+  Aero := 0.0028 * FSpeed * Abs(FSpeed);
   FSpeed := FSpeed - Aero * SecondsPassed;
 
   if Input.HandBrake then
-    FSpeed := FSpeed * Power(0.22, SecondsPassed);
+    FSpeed := FSpeed * Power(0.18, SecondsPassed);
 
   FSpeed := ClampS(FSpeed, -MaxReverse, MaxForward);
 
-  { Analog mouse steering first; keyboard remains as a fallback. }
-  TargetSteer := ClampS(Input.SteeringAxis, -1.0, 1.0) * MaxSteer;
-  if Input.Left then TargetSteer := MaxSteer;
-  if Input.Right then TargetSteer := -MaxSteer;
+  TargetSteer := ClampS(Input.Steering, -1.0, 1.0) * MaxSteer;
 
-  { Slower steering at speed, but still responsive at parking speeds. }
-  SteerSpeed := 6.2 / (1.0 + Abs(FSpeed) * 0.045);
+  SteerSpeed := 6.0 / (1.0 + Abs(FSpeed) * 0.045);
   FSteering := FSteering + (TargetSteer - FSteering) *
     ClampS(SteerSpeed * SecondsPassed, 0.0, 1.0);
 
-  if Abs(FSpeed) > 0.05 then
+  if Abs(FSpeed) > 0.04 then
     FYaw := FYaw + (FSpeed / WheelBase) * Tan(FSteering) * SecondsPassed;
 
   FX := FX + Sin(FYaw) * FSpeed * SecondsPassed;
