@@ -26,7 +26,7 @@ type
 implementation
 
 uses
-  Math, CastleColors;
+  Math, CastleColors, CastleRenderOptions;
 
 constructor TCockpit3D.Create(const AOwner: TComponent;
   const AViewport: TCastleViewport);
@@ -40,14 +40,11 @@ begin
   FRoot := TCastleTransform.Create(FOwner);
   FViewport.Items.Add(FRoot);
 
-  { Detailed cockpit mesh generated during CI. It uses glTF PBR materials
-    for soft-touch plastic, leather, aluminium, chrome, glass and emissive displays. }
   FStaticScene := TCastleScene.Create(FOwner);
   FStaticScene.Load('castle-data:/cockpit/cockpit_static.glb');
   FStaticScene.Collides := False;
   FRoot.Add(FStaticScene);
 
-  { Wheel is its own mesh so the driver's input rotates real 3D geometry. }
   FWheelPivot := TCastleTransform.Create(FOwner);
   FWheelPivot.Translation := Vector3(-0.06, 1.235, -0.57);
   FRoot.Add(FWheelPivot);
@@ -57,7 +54,6 @@ begin
   FWheelScene.Collides := False;
   FWheelPivot.Add(FWheelScene);
 
-  { Dynamic speed needle layered over the physical instrument cluster. }
   FSpeedNeedle := TCastleTransform.Create(FOwner);
   FSpeedNeedle.Translation := Vector3(-0.245, 1.305, -1.258);
   FRoot.Add(FSpeedNeedle);
