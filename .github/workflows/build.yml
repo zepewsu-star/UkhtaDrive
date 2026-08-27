@@ -23,6 +23,9 @@ jobs:
       - name: Generate 3D cockpit assets
         run: python tools/generate_cockpit.py
 
+      - name: Generate winter PBR textures
+        run: python tools/generate_world_textures.py
+
       - name: Setup Castle Game Engine
         run: |
           cd /tmp/
