@@ -20,6 +20,9 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7
 
+      - name: Generate 3D cockpit assets
+        run: python tools/generate_cockpit.py
+
       - name: Setup Castle Game Engine
         run: |
           cd /tmp/
