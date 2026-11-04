@@ -12,7 +12,7 @@ permissions:
 jobs:
   build:
     name: Compile installable APK
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - name: Checkout branch
         uses: actions/checkout@v4
@@ -23,16 +23,20 @@ jobs:
         with:
           distribution: temurin
           java-version: '17'
-      - name: Install Android command-line tools
-        uses: android-actions/setup-android@v3
-      - name: Install Android SDK 35
-        run: sdkmanager 'platforms;android-35' 'build-tools;35.0.0'
+      - name: Install Android SDK 35 from runner
+        shell: bash
+        run: |
+          SDK_ROOT="${ANDROID_HOME:-/usr/local/lib/android/sdk}"
+          SDK_MANAGER="$SDK_ROOT/cmdline-tools/latest/bin/sdkmanager"
+          test -x "$SDK_MANAGER"
+          yes | "$SDK_MANAGER" --licenses > /dev/null 2>&1 || true
+          "$SDK_MANAGER" --install 'platforms;android-35' 'build-tools;35.0.0' 'platform-tools'
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.9'
       - name: Assemble debug APK
-        run: gradle --no-daemon -p ParmaInvest assembleDebug
+        run: gradle --no-daemon --stacktrace -p ParmaInvest assembleDebug
       - name: Publish installer
         uses: actions/upload-artifact@v4
         with:
