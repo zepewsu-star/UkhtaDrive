@@ -52,6 +52,10 @@ public class MainActivity extends Activity {
         CookieHandler.setDefault(cookies);
         getWindow().setStatusBarColor(BG);
         getWindow().setNavigationBarColor(BG);
+        // На Android 11+ используем полноэкранную область и сами учитываем системные панели.
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
+            getWindow().setDecorFitsSystemWindows(false);
+        }
         showLogin(null);
     }
     private int dp(int n) { return (int)(n*getResources().getDisplayMetrics().density+.5f); }
@@ -76,7 +80,19 @@ public class MainActivity extends Activity {
     private void add(LinearLayout parent,View view,int bottom) { parent.addView(view,margins(bottom)); }
     private void frame() {
         root=vertical(); root.setBackgroundColor(BG);
-        root.setPadding(dp(18),dp(18),dp(18),dp(12));
+        final int horizontal=dp(18), top=dp(18), bottom=dp(12);
+        root.setPadding(horizontal,top,horizontal,bottom);
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
+            root.setOnApplyWindowInsetsListener((view,insets)->{
+                android.graphics.Insets system=insets.getInsets(
+                    android.view.WindowInsets.Type.systemBars()
+                    | android.view.WindowInsets.Type.displayCutout());
+                // Нижнее меню остаётся над системной навигацией Android (кнопки/жесты).
+                view.setPadding(horizontal+system.left,top+system.top,
+                    horizontal+system.right,bottom+system.bottom);
+                return insets;
+            });
+        }
         setContentView(root);
     }
     private Button button(String label,boolean primary) {
