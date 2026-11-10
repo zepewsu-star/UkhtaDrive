@@ -8,6 +8,10 @@ import javax.crypto.Cipher;
 import android.security.keystore.KeyPermanentlyInvalidatedException;
 import android.os.Bundle;
 import android.graphics.Color;
+import java.util.Locale;
+import java.time.LocalDate;
+import java.time.ZoneId;
+import java.time.temporal.ChronoUnit;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
 import android.text.InputType;
@@ -48,7 +52,8 @@ public class MainActivity extends Activity {
     private TextView notice;
     private EditText password;
     private Button loginButton;
-    private JSONObject summary, analyst, system;
+    private JSONObject summary, analyst, system, market;
+    private int radarLoadingId=-1;
     private String activeTab="home";
     private boolean loading=false;
     private boolean dashboardVisible=false;
@@ -187,10 +192,11 @@ public class MainActivity extends Activity {
                 if(!first.has("stats")) throw new Exception("Панель не подтвердила вход.");
                 JSONObject ana=new JSONObject(request("GET","api.php?action=analyst",null));
                 JSONObject sys=new JSONObject(request("GET","api.php?action=system",null));
-                if(ana.has("error") || sys.has("error"))
+                JSONObject mkt=new JSONObject(request("GET","api.php?action=market",null));
+                if(ana.has("error") || sys.has("error") || mkt.has("error"))
                     throw new Exception("Доступ к аналитике не подтверждён.");
                 runOnUiThread(()->{
-                    summary=first;analyst=ana;system=sys;
+                    summary=first;analyst=ana;system=sys;market=mkt;
                     loading=false;
                     passwordForBiometricSetup=fromBiometric?null:pass;
                     dashboard();
@@ -367,18 +373,20 @@ public class MainActivity extends Activity {
     }
     private void setTab(String key) {
         activeTab=key;tabs.removeAllViews();
-        String[] labels={"Обзор","Аналитика","Система"};
-        String[] keys={"home","analyst","system"};
+        String[] labels={"Обзор","Сигналы","Аналитика","Система"};
+        String[] keys={"home","radar","analyst","system"};
         for(int i=0;i<keys.length;i++) {
             final String next=keys[i];
             Button b=button(labels[i],key.equals(next));
-            b.setTextSize(12);b.setOnClickListener(v->setTab(next));
+            b.setTextSize(11);b.setOnClickListener(v->setTab(next));
             LinearLayout.LayoutParams lp=new LinearLayout.LayoutParams(0,dp(50),1);
             if(i>0) lp.leftMargin=dp(6);
             tabs.addView(b,lp);
         }
         content.removeAllViews();
+        radarLoadingId=-1;
         if("home".equals(key)) showHome();
+        else if("radar".equals(key)) showRadar();
         else if("analyst".equals(key)) showAnalyst();
         else showSystem();
     }
@@ -412,6 +420,174 @@ public class MainActivity extends Activity {
                 "За 30 дней: "+str(w,"return_30d_pct")+"% · Под наблюдением");
         }
         add(content,text("Никаких команд «Бери сейчас», пока стратегия не доказала качество на независимых данных.",13,GREEN,false),12);
+    }
+    // Research-only radar: does not create trades or alter server data.
+    private static String fmt(double val) {
+        if (!Double.isFinite(val)) return "—";
+        return String.format(Locale.forLanguageTag("ru-RU"),
+            Math.abs(val)<10.0?"%.4f":"%.2f",val);
+    }
+    private static String percent(double val) {
+        if(!Double.isFinite(val)) return "—";
+        return String.format(Locale.forLanguageTag("ru-RU"),"%.1f%%",val);
+    }
+    private static double numeric(JSONObject obj,String key) {
+        if(obj==null || obj.isNull(key))return Double.NaN;
+        try {
+            double value=Double.parseDouble(obj.optString(key,""));
+            return Double.isFinite(value)?value:Double.NaN;
+        } catch(Exception e) {return Double.NaN;}
+    }
+    private static boolean fresh(String ymd) {
+        try {
+            LocalDate marketDate=LocalDate.parse(ymd.substring(0,10));
+            LocalDate now=LocalDate.now(ZoneId.of("Europe/Moscow"));
+            long age=ChronoUnit.DAYS.between(marketDate,now);
+            return age>=0 && age<=10;
+        } catch(Exception e) {return false;}
+    }
+    private void showRadar() {
+        title("Радар · исследования",
+            "Наблюдения рынка, не команды на покупку или продажу.");
+        JSONObject results=system==null?null:system.optJSONObject("universe_research");
+        if(results!=null) {
+            String wins=str(results,"total_wins");
+            String signals=str(results,"total_signals");
+            card("Историческая проверка","Прибыльных "+wins+" из "+signals,
+                "Стратегия не допущена к реальным сделкам. Размер и качество выборки ограничены.");
+        }
+        JSONArray all=market==null?null:market.optJSONArray("rows");
+        if(all==null) {
+            card("Нет данных рынка","", "Проверь соединение и обнови экран.");
+            return;
+        }
+        int quality=0;
+        for(int i=0;i<all.length();i++) {
+            JSONObject r=all.optJSONObject(i);
+            if(r!=null && "ok".equalsIgnoreCase(str(r,"quality"))) quality++;
+        }
+        card("Исследовательский обзор",all.length()+" инструментов",
+            "Данные из существующего API рынка (не весь каталог). Качество OK: "+quality+
+            ". Балл модели не равен вероятности прибыли.");
+        add(content,text("КАНДИДАТЫ ПОД НАБЛЮДЕНИЕМ",12,GOLD,true),12);
+        int shown=0;
+        for(int i=0;i<all.length() && shown<14;i++) {
+            JSONObject row=all.optJSONObject(i);
+            if(row==null || !"ok".equalsIgnoreCase(str(row,"quality"))
+               || !Double.isFinite(numeric(row,"last_price"))) continue;
+            addRadarCard(row);
+            shown++;
+        }
+        if(shown==0) {
+            card("Подтверждённых кандидатов сейчас нет","",
+                "Остальные инструменты не соответствуют требованиям качества данных.");
+        }
+        add(content,text("Нажми «Уровни» у инструмента. Приложение прочитает "+
+            "90 последних дневных свечей и рассчитает предварительную зону наблюдения. "+
+            "Алгоритм не оценивает целевую доходность на 6–12 месяцев.",12,MUTED,false),10);
+    }
+    private void addRadarCard(JSONObject row) {
+        LinearLayout box=vertical();
+        box.setPadding(dp(15),dp(14),dp(15),dp(14));
+        box.setBackground(surface(PANEL,12));
+        String symbol=str(row,"secid"), name=str(row,"shortname");
+        add(box,text(symbol+" · "+name,16,WHITE,true),6);
+        double p=numeric(row,"last_price");
+        add(box,text(fmt(p)+" ₽",21,GOLD,true),5);
+        add(box,text("30 дней: "+str(row,"return_30d_pct")+"% · RSI: "+
+            str(row,"rsi14")+" · Балл: "+str(row,"score")+
+            " (не вероятность прибыли)",12,MUTED,false),5);
+        String date=str(row,"last_trade_date");
+        boolean dateOk=fresh(date);
+        add(box,text("Сессия: "+date+(dateOk?"":" · проверить свежесть данных"),
+            12,dateOk?GREEN:GOLD,false),11);
+        Button details=button("Исследовать уровни",false);
+        details.setOnClickListener(v->openRadarDetail(row));
+        add(box,details,0);
+        add(content,box,10);
+    }
+    private void openRadarDetail(JSONObject instrument) {
+        final int id=instrument.optInt("id",-1);
+        if(id<=0) {notice.setText("Нет идентификатора инструмента.");return;}
+        radarLoadingId=id;
+        content.removeAllViews();
+        title(str(instrument,"secid")+" · исследование",
+            "Зона наблюдения из реальных закрытий, не торговая рекомендация.");
+        Button back=button("← Все инструменты",false);
+        back.setOnClickListener(v->showRadarAndReset());
+        add(content,back,12);
+        card("Получаем историю","", "Читаем до 90 последних дневных свечей с сервера…");
+        new Thread(()->{
+            try {
+                JSONObject series=new JSONObject(request("GET","api.php?action=series&id="+id,null));
+                if(series.has("error"))throw new Exception(series.optString("error"));
+                JSONArray rows=series.optJSONArray("candles");
+                if(rows==null)throw new Exception("Сервер не вернул историю.");
+                double[] closes=new double[rows.length()];
+                for(int i=0;i<rows.length();i++) {
+                    JSONObject candle=rows.optJSONObject(i);
+                    closes[i]=numeric(candle,"close_price");
+                    if(!Double.isFinite(closes[i])||closes[i]<=0.0)
+                        throw new Exception("Некорректные цены в истории.");
+                }
+                RadarStudy.Result study=RadarStudy.analyze(closes);
+                String lastDate=rows.length()==0?"":rows.optJSONObject(rows.length()-1).optString("trade_date","");
+                runOnUiThread(()->{
+                    if(!"radar".equals(activeTab) || radarLoadingId!=id) return;
+                    showRadarResult(instrument,study,lastDate);
+                });
+            } catch(Exception e) {
+                runOnUiThread(()->{
+                    if(!"radar".equals(activeTab) || radarLoadingId!=id) return;
+                    content.removeAllViews();
+                    title("Нет результата",str(instrument,"secid")+" · "+e.getMessage());
+                    Button b=button("← Вернуться к радару",false);
+                    b.setOnClickListener(v->showRadarAndReset());add(content,b,12);
+                });
+            }
+        }).start();
+    }
+    private void showRadarAndReset() {
+        radarLoadingId=-1;
+        content.removeAllViews();
+        showRadar();
+    }
+    private void showRadarResult(JSONObject instrument,RadarStudy.Result a,String latestDate) {
+        content.removeAllViews();
+        title(str(instrument,"secid")+" · "+str(instrument,"shortname"),
+            "Исследование цены · только исторические дневные закрытия.");
+        Button back=button("← Вернуться к радару",false);
+        back.setOnClickListener(v->showRadarAndReset());add(content,back,12);
+        if(a==null) {
+            card("Недостаточно истории","", "Требуется минимум 60 дневных сессий.");
+            return;
+        }
+        card("Последняя цена закрытия",fmt(a.last)+" ₽",
+            "Последняя свеча: "+latestDate+
+            (fresh(latestDate)?"":" · ДАННЫЕ УСТАРЕЛИ; уровни неактуальны"));
+        if(!fresh(latestDate)||!"ok".equalsIgnoreCase(str(instrument,"quality"))) {
+            card("Исследование приостановлено","",
+                "Недостаточное качество либо свежесть данных. Торгового сигнала нет.");
+            return;
+        }
+        boolean near=a.last>=a.min20 && a.last<=a.min20*1.03 && a.mean20>=a.mean60;
+        card("Условие наблюдения",near?"Цена в зоне наблюдения":"Вне зоны наблюдения",
+            "Зона: "+fmt(a.min20)+"–"+fmt(a.min20*1.03)+
+            " ₽ (минимум закрытий 20 сессий +3%). "+
+            "Нужна отдельная проверка тренда, ликвидности и риска.");
+        card("Ценовые ориентиры",
+            "Поддержка: "+fmt(a.min20)+" ₽",
+            "Верхняя граница последних 20 закрытий: "+fmt(a.max20)+
+            " ₽. Это не гарантированные точки покупки и продажи.");
+        card("Исторический риск",percent(a.maxDrawdown60),
+            "Максимальная просадка по закрытиям за последние 60 сессий. "+
+            "Будущая просадка может быть выше.");
+        card("Горизонт 6–12 месяцев","Прогноз не подтверждён",
+            "Целевая доходность, цена продажи и вероятность успеха "+
+            "не рассчитываются без независимых испытаний стратегии.");
+        add(content,text("ВНИМАНИЕ: сценарий демонстрационный, без учёта комиссий, "+
+            "спреда, ликвидности и налогов. Ни покупку, ни продажу не инициирует.",
+            12,GOLD,false),10);
     }
     private void showAnalyst() {
         title("Перспективные кандидаты","Исследовательский список, а не сигналы на покупку.");
@@ -484,8 +660,11 @@ public class MainActivity extends Activity {
                 JSONObject s=new JSONObject(request("GET","api.php?action=summary",null));
                 JSONObject a=new JSONObject(request("GET","api.php?action=analyst",null));
                 JSONObject y=new JSONObject(request("GET","api.php?action=system",null));
+                JSONObject m=new JSONObject(request("GET","api.php?action=market",null));
+                if(s.has("error")||a.has("error")||y.has("error")||m.has("error"))
+                    throw new Exception("Сервер отказал в предоставлении данных.");
                 runOnUiThread(()->{
-                    summary=s;analyst=a;system=y;loading=false;
+                    summary=s;analyst=a;system=y;market=m;loading=false;
                     notice.setText("Обновлено · "+str(s,"server_time")+" МСК");setTab(activeTab);
                 });
             } catch(Exception ex) {
