@@ -1,6 +1,11 @@
 package ru.parma.invest.client;
 
 import android.app.Activity;
+import android.app.AlertDialog;
+import android.hardware.biometrics.BiometricPrompt;
+import android.os.CancellationSignal;
+import javax.crypto.Cipher;
+import android.security.keystore.KeyPermanentlyInvalidatedException;
 import android.os.Bundle;
 import android.graphics.Color;
 import android.graphics.Typeface;
@@ -46,6 +51,10 @@ public class MainActivity extends Activity {
     private JSONObject summary, analyst, system;
     private String activeTab="home";
     private boolean loading=false;
+    private boolean dashboardVisible=false;
+    private boolean unlockOnResume=false;
+    private boolean biometricDialogOpen=false;
+    private String passwordForBiometricSetup=null;
 
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
@@ -57,6 +66,25 @@ public class MainActivity extends Activity {
             getWindow().setDecorFitsSystemWindows(false);
         }
         showLogin(null);
+        if (BiometricVault.isEnabled(this)) {
+            getWindow().getDecorView().post(this::beginBiometricLogin);
+        }
+    }
+    // После возврата из другого приложения снова закрываем финансовые данные.
+    @Override protected void onStop() {
+        if (dashboardVisible && BiometricVault.isEnabled(this) && !biometricDialogOpen) {
+            unlockOnResume=true;
+            dashboardVisible=false;
+        }
+        super.onStop();
+    }
+    @Override protected void onStart() {
+        super.onStart();
+        if (unlockOnResume) {
+            unlockOnResume=false;
+            showLogin(null);
+            getWindow().getDecorView().post(this::beginBiometricLogin);
+        }
     }
     private int dp(int n) { return (int)(n*getResources().getDisplayMetrics().density+.5f); }
     private GradientDrawable surface(int color,int radius) {
@@ -104,7 +132,7 @@ public class MainActivity extends Activity {
         b.setMinimumHeight(dp(52)); return b;
     }
     private void showLogin(String error) {
-        loading=false; frame();
+        loading=false; dashboardVisible=false; frame();
         LinearLayout header=vertical();
         header.setPadding(dp(7),dp(64),dp(7),dp(18));
         add(header,text("PI  /  PRIVATE FINANCIAL DESK",12,GOLD,true),22);
@@ -112,7 +140,10 @@ public class MainActivity extends Activity {
         add(header,text("Инвестиционный помощник",16,MUTED,false),8);
         root.addView(header,margins(35));
         add(root,text("Вход в аналитическую систему",18,WHITE,true),10);
-        add(root,text("Используй пароль от панели invest.snt-parma.ru. Пароль не сохраняется в приложении.",14,MUTED,false),22);
+        add(root,text(BiometricVault.isEnabled(this)
+            ? "Войти можно по отпечатку или паролю панели invest.snt-parma.ru."
+            : "Первый вход — по паролю панели. Затем можно включить отпечаток.",
+            14,MUTED,false),22);
         password=new EditText(this);
         password.setSingleLine(true); password.setHint("Пароль панели");
         password.setTextColor(WHITE); password.setHintTextColor(MUTED);
@@ -123,37 +154,164 @@ public class MainActivity extends Activity {
         loginButton=button("Войти",true);
         loginButton.setOnClickListener(v->login());
         add(root,loginButton,12);
+        if (BiometricVault.isEnabled(this) && BiometricVault.isSupported(this)) {
+            Button finger=button("Войти по отпечатку",false);
+            finger.setOnClickListener(v->beginBiometricLogin());
+            add(root,finger,12);
+        }
         notice=text(error==null?"Только HTTPS · реальные торговые сигналы отключены":error,
             13,error==null?MUTED:GOLD,false);
         add(root,notice,10);
     }
     private void login() {
-        if(loading) return;
+        if(loading || password==null) return;
         final String pass=password.getText().toString();
-        if(pass.length()==0) { notice.setText("Введи пароль."); return; }
-        loading=true; loginButton.setEnabled(false);
-        notice.setText("Соединяемся с сервером…");
+        if(pass.isEmpty()) { notice.setText("Введи пароль."); return; }
+        loginWithPassword(pass,false);
+    }
+    private void loginWithPassword(final String pass,final boolean fromBiometric) {
+        if(loading) return;
+        loading=true;
+        if(loginButton!=null) loginButton.setEnabled(false);
+        if(notice!=null) notice.setText("Проверяем доступ к серверу…");
         new Thread(()->{
             try {
                 String html=request("GET","index.php",null);
                 Matcher m=Pattern.compile("name=[\\\"']csrf[\\\"'][^>]*value=[\\\"']([^\\\"']+)[\\\"']").matcher(html);
-                if(!m.find()) throw new Exception("Не удалось получить защитный токен входа.");
+                if(!m.find()) throw new Exception("Не найден токен авторизации.");
                 String post="password="+URLEncoder.encode(pass,"UTF-8")
                     +"&csrf="+URLEncoder.encode(m.group(1),"UTF-8");
                 request("POST","index.php",post);
                 JSONObject first=new JSONObject(request("GET","api.php?action=summary",null));
                 if(first.has("error")) throw new Exception(first.optString("error"));
-                summary=first;
-                analyst=new JSONObject(request("GET","api.php?action=analyst",null));
-                system=new JSONObject(request("GET","api.php?action=system",null));
-                runOnUiThread(()->{loading=false;dashboard();});
-            } catch(Exception ex) {
+                if(!first.has("stats")) throw new Exception("Панель не подтвердила вход.");
+                JSONObject ana=new JSONObject(request("GET","api.php?action=analyst",null));
+                JSONObject sys=new JSONObject(request("GET","api.php?action=system",null));
+                if(ana.has("error") || sys.has("error"))
+                    throw new Exception("Доступ к аналитике не подтверждён.");
                 runOnUiThread(()->{
-                    loading=false; loginButton.setEnabled(true);
-                    notice.setText("Не удалось войти. Проверь пароль и сеть. "+ex.getMessage());
+                    summary=first;analyst=ana;system=sys;
+                    loading=false;
+                    passwordForBiometricSetup=fromBiometric?null:pass;
+                    dashboard();
+                    // Предложение появляется один раз; в «Системе» можно включить позже.
+                    if(!fromBiometric && !BiometricVault.isEnabled(this)
+                         && BiometricVault.isSupported(this)
+                         && !getPreferences(MODE_PRIVATE).getBoolean("biometric_offered",false)) {
+                        getPreferences(MODE_PRIVATE).edit().putBoolean("biometric_offered",true).apply();
+                        new AlertDialog.Builder(this)
+                            .setTitle("Вход по отпечатку")
+                            .setMessage("Включить вход по отпечатку? Пароль будет зашифрован ключом Android Keystore; открыть его сможет только подтверждённый отпечаток.")
+                            .setPositiveButton("Включить",(d,w)->enableBiometric())
+                            .setNegativeButton("Позже",null)
+                            .show();
+                    }
                 });
+            } catch(Exception ex) {
+                runOnUiThread(()->showLogin("Не удалось войти: "+ex.getMessage()
+                    +". Можно попробовать пароль ещё раз."));
             }
         }).start();
+    }
+    private BiometricPrompt prompt(String title,boolean enrollment,BiometricPrompt.AuthenticationCallback callback) {
+        return new BiometricPrompt.Builder(this)
+            .setTitle(title)
+            .setSubtitle(enrollment?"Подтверди сохранение защищённого входа":"Подтверди вход в PARMA INVEST")
+            .setAllowedAuthenticators(android.hardware.biometrics.BiometricManager.Authenticators.BIOMETRIC_STRONG)
+            .setNegativeButton("Ввести пароль",getMainExecutor(),(dialog,which)->{})
+            .build();
+    }
+    private void beginBiometricLogin() {
+        if(loading || biometricDialogOpen || !BiometricVault.isEnabled(this)) return;
+        if(!BiometricVault.isSupported(this)) {
+            if(notice!=null)notice.setText("Отпечаток недоступен. Войди по паролю.");
+            return;
+        }
+        try {
+            Cipher cipher=BiometricVault.newDecryptCipher(this);
+            biometricDialogOpen=true;
+            BiometricPrompt.AuthenticationCallback cb=new BiometricPrompt.AuthenticationCallback() {
+                @Override public void onAuthenticationSucceeded(BiometricPrompt.AuthenticationResult result) {
+                    biometricDialogOpen=false;
+                    try {
+                        BiometricPrompt.CryptoObject crypto=result.getCryptoObject();
+                        if(crypto==null || crypto.getCipher()==null)throw new Exception("Не получен ключ.");
+                        String pass=BiometricVault.decrypt(thisActivity(),crypto.getCipher());
+                        loginWithPassword(pass,true);
+                    } catch(Exception ex) {
+                        BiometricVault.forget(thisActivity());
+                        showLogin("Доступ по отпечатку необходимо настроить заново. Войди по паролю.");
+                    }
+                }
+                @Override public void onAuthenticationError(int code,CharSequence message) {
+                    biometricDialogOpen=false;
+                    if(notice!=null)notice.setText("Отпечаток отменён или недоступен. Можно войти по паролю.");
+                }
+                @Override public void onAuthenticationFailed() {
+                    if(notice!=null)notice.setText("Отпечаток не распознан, попробуй ещё раз.");
+                }
+            };
+            prompt("PARMA INVEST · Отпечаток",false,cb).authenticate(
+                new BiometricPrompt.CryptoObject(cipher),new CancellationSignal(),getMainExecutor(),cb); 
+        } catch(KeyPermanentlyInvalidatedException ex) {
+            BiometricVault.forget(this);
+            showLogin("Отпечатки на телефоне изменились. Войди по паролю и включи отпечаток заново.");
+        } catch(Exception ex) {
+            BiometricVault.forget(this);
+            showLogin("Не удалось открыть защищённый ключ. Войди по паролю и настрой отпечаток заново.");
+        }
+    }
+    private MainActivity thisActivity(){return this;}
+    private void enableBiometric() {
+        if(biometricDialogOpen || passwordForBiometricSetup==null) {
+            if(notice!=null)notice.setText("Для настройки отпечатка сначала войди по паролю.");
+            return;
+        }
+        if(!BiometricVault.isSupported(this)) {
+            if(notice!=null)notice.setText("В настройках телефона нужен зарегистрированный надёжный отпечаток.");
+            return;
+        }
+        try {
+            Cipher cipher=BiometricVault.newEncryptCipher(this);
+            final String pass=passwordForBiometricSetup;
+            biometricDialogOpen=true;
+            BiometricPrompt.AuthenticationCallback cb=new BiometricPrompt.AuthenticationCallback() {
+                @Override public void onAuthenticationSucceeded(BiometricPrompt.AuthenticationResult result) {
+                    biometricDialogOpen=false;
+                    try {
+                        BiometricPrompt.CryptoObject crypto=result.getCryptoObject();
+                        if(crypto==null||crypto.getCipher()==null)throw new Exception("Нет ключа.");
+                        BiometricVault.storeEncrypted(thisActivity(),crypto.getCipher(),pass);
+                        passwordForBiometricSetup=null;
+                        setTab("system");
+                        new AlertDialog.Builder(thisActivity()).setTitle("Готово")
+                           .setMessage("Отпечаток включён. При следующем открытии PARMA INVEST появится системная проверка.")
+                           .setPositiveButton("ОК",null).show();
+                    } catch(Exception ex) {
+                        if(notice!=null)notice.setText("Не удалось включить отпечаток. Повтори в разделе «Система».");
+                    }
+                }
+                @Override public void onAuthenticationError(int code,CharSequence message) {
+                    biometricDialogOpen=false;
+                    if(notice!=null)notice.setText("Настройка отпечатка отменена.");
+                }
+            };
+            prompt("Включить вход по отпечатку",true,cb).authenticate(
+                new BiometricPrompt.CryptoObject(cipher),
+                new CancellationSignal(),getMainExecutor(),cb);
+        } catch(Exception ex) {
+            if(notice!=null)notice.setText("Система не разрешила настройку отпечатка.");
+        }
+    }
+    private void disableBiometric() {
+        new AlertDialog.Builder(this)
+            .setTitle("Отключить отпечаток?")
+            .setMessage("Сохранённый зашифрованный пароль и ключ будут удалены с телефона.")
+            .setPositiveButton("Отключить",(d,w)->{
+                BiometricVault.forget(this);
+                passwordForBiometricSetup=null;
+                setTab("system");
+            }).setNegativeButton("Отмена",null).show();
     }
     private String request(String method,String path,String body) throws Exception {
         URL url=new URL(BASE+path);
@@ -187,6 +345,7 @@ public class MainActivity extends Activity {
         } finally { c.disconnect(); }
     }
     private void dashboard() {
+        dashboardVisible=true;
         frame();
         LinearLayout top=new LinearLayout(this);top.setGravity(Gravity.CENTER_VERTICAL);
         TextView logo=text("PARMA  INVEST",22,WHITE,true);
@@ -298,6 +457,22 @@ public class MainActivity extends Activity {
                 JSONObject j=jobs.optJSONObject(i);if(j==null)continue;
                 card(str(j,"job_name"),str(j,"status"),str(j,"started_at"));
             }
+        }
+        if(BiometricVault.isSupported(this)) {
+            if(BiometricVault.isEnabled(this)) {
+                card("Защита входа","Отпечаток включён","Проверка защищает сохранённый пароль панели.");
+                if(passwordForBiometricSetup!=null) {
+                    Button renew=button("Обновить сохранённый пароль",false);
+                    renew.setOnClickListener(v->enableBiometric()); add(content,renew,8);
+                }
+                Button disable=button("Отключить вход по отпечатку",false);
+                disable.setOnClickListener(v->disableBiometric()); add(content,disable,10);
+            } else if(passwordForBiometricSetup!=null) {
+                Button enroll=button("Включить вход по отпечатку",true);
+                enroll.setOnClickListener(v->enableBiometric()); add(content,enroll,10);
+            }
+        } else {
+            add(content,text("Для входа по отпечатку нужен Android 11+ и надёжный отпечаток в настройках телефона.",12,MUTED,false),12);
         }
         add(content,text("Приложение не управляет Cron, не загружает котировки и не совершает сделки.",12,MUTED,false),10);
     }
